@@ -28,6 +28,7 @@ abstract class Producer<T> extends AbstractActor{
 	boolean running = false;
 	int maxStorage = 10;	
 	abstract CompletableFuture<T> make();
+	public boolean hasProduct() {return !products.isEmpty();}
 	public Receive createReceive() {
 		return receiveBuilder()
 			.match(Product.class, c-> { 
@@ -46,80 +47,32 @@ abstract class Producer<T> extends AbstractActor{
 }
 class Alice extends Producer<Wheat>{
 	CompletableFuture<Wheat> make(){return CompletableFuture.supplyAsync(()->new Wheat());}
-	/*
-	public Receive createReceive() {
-		return receiveBuilder()
-			.match(Wheat.class,c-> { products.add(c);				
-			    self().tell(new MakeOne(),self());})
-			.match(MakeOne.class,c-> {
-				if(products.size() >= maxStorage){running = false;}
-				else {Patterns.pipe(make(), context().dispatcher()).to(self());}})
-			.match(GiveOne.class,c-> {
-				if (!products.isEmpty()){sender().tell(products.remove(products.size()-1),self());}
-				else {Patterns.pipe(make(), context().dispatcher()).to(sender());}
-				if (products.size() < maxStorage && !running){						
-				    running = true;
-					self().tell(new MakeOne(),self());}})
-			.build();}*/
 }
 class Bob extends Producer<Sugar>{
+	int makingCount=0;
 	CompletableFuture<Sugar> make(){
 		synchronized(Sugar.class) {
-			try {Thread.sleep(2);
+			try {Thread.sleep(200); //ms time taken to make
 			} catch (InterruptedException e) {}
 		}
 		return CompletableFuture.supplyAsync(()-> new Sugar());}
-	/*
-	public Receive createReceive() {
-	    return receiveBuilder()
-			.match(Sugar.class,c-> { products.add(c);
-			    self().tell(new MakeOne(),self());})				
-			.match(MakeOne.class,c-> {
-			    if(products.size() >= maxStorage){running = false;}
-				else {Patterns.pipe(make(), context().dispatcher()).to(self());}})
-			.match(GiveOne.class,c-> {
-				if (!products.isEmpty()){sender().tell(products.remove(products.size()-1),self());}
-				else {Patterns.pipe(make(), context().dispatcher()).to(sender());}
-				if (products.size() < maxStorage && !running){
-					running = true;
-					self().tell(new MakeOne(),self());}})
-			.build();}*/
 }
 class Charles extends Producer<Cake>{
 	ActorRef alice;
 	List<ActorRef> bobs = new ArrayList<>();
 	public Charles(ActorRef alice,List<ActorRef> bobs){this.alice=alice;this.bobs=bobs;}
 	CompletableFuture<Cake> make(){
-		//ActorSelection alice = context().actorSelection("akka://Cakes/user/Alice");
-		//ActorSelection bob = context().actorSelection("akka://Cakes/user/Bob");
 		CompletableFuture<?> wheat = Patterns.ask(alice, 
 				new GiveOne(),Duration.ofMillis(10_000_000)).toCompletableFuture();
+		
+		for(ActorRef bob:bobs) {}
 		CompletableFuture<?> sugar = Patterns.ask(bobs.get(0), 
 				new GiveOne(),Duration.ofMillis(10_000_000)).toCompletableFuture();
+		
 		//When the ingredients are ready, initiate cake making and return the completable future
 		return CompletableFuture.allOf(wheat, sugar)
-			.thenApplyAsync(v -> new Cake((Sugar) sugar.join(), (Wheat) wheat.join()));
+			.thenApplyAsync(v -> new Cake((Sugar)sugar.join(), (Wheat)wheat.join()));
 	}
-	/*
-	public Receive createReceive() {
-		return receiveBuilder()
-			.match(Cake.class,c-> {
-				products.add(c);
-				self().tell(new MakeOne(),self());})
-			.match(MakeOne.class,c-> {
-				if(products.size() >= maxStorage){ //If at or over limit then stop running
-					running = false;}
-				else { //pipe a future product to self
-					Patterns.pipe(make(), context().dispatcher()).to(self());}})
-			.match(GiveOne.class,c-> {
-			    //When product list empty, pipe a future product to sender, else send the real thing
-				if (products.isEmpty()) { Patterns.pipe(make(), context().dispatcher()).to(sender()); }
-				else { sender().tell(products.remove(products.size()-1),self()); }
-				//When not-running and list not full then set state as running and tell MakeOne to self
-				if (products.size() < maxStorage && !running){
-					running = true;
-					self().tell(new MakeOne(),self());}})				
-			.build();}*/
 }
 class Tim extends AbstractActor{
 	int hunger;
@@ -127,7 +80,6 @@ class Tim extends AbstractActor{
 	boolean running=true;
 	ActorRef originalSender=null;
 	void askForCake(ActorRef charles){
-		//ActorSelection charles = context().actorSelection("akka://Cakes/user/Charles");
 		CompletableFuture<?> cake = Patterns.ask(charles, new GiveOne(),
 				Duration.ofMillis(10_000_000)).toCompletableFuture();
 		cake.join();
@@ -158,18 +110,26 @@ public class Cakes{
 			"time taken:" + ((System.nanoTime()-startTime)/1000000000.00) + "\n");}
 	public static Gift computeGift(int hunger){		
 		ActorSystem s=AkkaConfig.newSystem("Cakes",2501,Map.of(
-			"Tim","172.17.0.2",
-			"Bob","172.17.0.2",
-			"Charles","172.17.0.2"
+			//"Tim","172.17.0.2",
+			//"Bob","172.17.0.2",
+			//"Charles","172.17.0.2"		
+			"Tim","192.168.1.22",
+			"Bob0","192.168.1.22",
+			"Bob1","192.168.1.22",
+			"Bob2","192.168.1.22",
+			"Bob3","192.168.1.22",			
+			"Charles","192.168.1.22"
 			//Alice stays local
-		));
+		));		
 		ActorRef alice=//makes wheat
 			s.actorOf(Props.create(Alice.class,()->new Alice()),"Alice");
-		ActorRef bob=//makes sugar
-			s.actorOf(Props.create(Bob.class,()->new Bob()),"Bob");
+		//ActorRef bob=//makes sugar
+		List<ActorRef> bobs = new ArrayList<>();
+		int numberOfBobs = 1;
+		for(int i=0;i<numberOfBobs;i++) {
+			bobs.add(s.actorOf(Props.create(Bob.class,()->new Bob()),"Bob"+i));}
 		ActorRef charles=// makes cakes with wheat and sugar
-			s.actorOf(Props.create(Charles.class,()
-					->new Charles(alice,List.of(bob))),"Charles");
+			s.actorOf(Props.create(Charles.class,()->new Charles(alice,bobs)),"Charles");
 		ActorRef tim=//tim wants to eat cakes
 			s.actorOf(Props.create(Tim.class,()->new Tim(hunger)),"Tim");
 		CompletableFuture<Object> gift = Patterns.ask(tim,charles, 
@@ -177,7 +137,7 @@ public class Cakes{
 		try{return (Gift)gift.join();}
 		finally{			
 			alice.tell(PoisonPill.getInstance(),ActorRef.noSender());
-			bob.tell(PoisonPill.getInstance(),ActorRef.noSender());
+			for(ActorRef bob:bobs) {bob.tell(PoisonPill.getInstance(),ActorRef.noSender());}
 			charles.tell(PoisonPill.getInstance(),ActorRef.noSender());
 			tim.tell(PoisonPill.getInstance(),ActorRef.noSender());
 			s.terminate();}}
