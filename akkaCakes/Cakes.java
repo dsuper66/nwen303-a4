@@ -126,23 +126,23 @@ class Tim extends AbstractActor{
 	public Tim(int hunger) {this.hunger=hunger;}
 	boolean running=true;
 	ActorRef originalSender=null;
-	void askForCake(){
-		ActorSelection charles = context().actorSelection("akka://Cakes/user/Charles");
+	void askForCake(ActorRef charles){
+		//ActorSelection charles = context().actorSelection("akka://Cakes/user/Charles");
 		CompletableFuture<?> cake = Patterns.ask(charles, new GiveOne(),
 				Duration.ofMillis(10_000_000)).toCompletableFuture();
 		cake.join();
 		hunger-=1;
 		if(hunger>0) {
 			System.out.println("YUMMY but I'm still hungry "+hunger);
-			askForCake();}
+			askForCake(charles);}
 		else {
 			running = false;
 			originalSender.tell(new Gift(), self());}}
 	public Receive createReceive() {
 		return receiveBuilder()
-			.match(GiftRequest.class,()->originalSender==null,gr->{
+			.match(ActorRef.class,()->originalSender==null,c->{
 				originalSender=sender();					
-				askForCake();})
+				askForCake(c);})
 			.build();}
 }
 public class Cakes{
@@ -158,9 +158,9 @@ public class Cakes{
 			"time taken:" + ((System.nanoTime()-startTime)/1000000000.00) + "\n");}
 	public static Gift computeGift(int hunger){		
 		ActorSystem s=AkkaConfig.newSystem("Cakes",2501,Map.of(
-			//"Tim","172.17.0.2",
-			//"Bob","172.17.0.2",
-			//"Charles","172.17.0.2"
+			"Tim","172.17.0.2",
+			"Bob","172.17.0.2",
+			"Charles","172.17.0.2"
 			//Alice stays local
 		));
 		ActorRef alice=//makes wheat
@@ -172,7 +172,7 @@ public class Cakes{
 					->new Charles(alice,List.of(bob))),"Charles");
 		ActorRef tim=//tim wants to eat cakes
 			s.actorOf(Props.create(Tim.class,()->new Tim(hunger)),"Tim");
-		CompletableFuture<Object> gift = Patterns.ask(tim,new GiftRequest(), 
+		CompletableFuture<Object> gift = Patterns.ask(tim,charles, 
 				Duration.ofMillis(10_000_000)).toCompletableFuture();
 		try{return (Gift)gift.join();}
 		finally{			
