@@ -22,13 +22,14 @@ class GiftRequest implements Serializable{}
 class MakeOne implements Serializable{}
 @SuppressWarnings("serial")
 class GiveOne implements Serializable{}
+@SuppressWarnings("serial")
+class HasProduct implements Serializable{}
 //--------
 abstract class Producer<T> extends AbstractActor{
 	List<Product> products =new ArrayList<>();
 	boolean running = false;
 	int maxStorage = 10;	
 	abstract CompletableFuture<T> make();
-	public boolean hasProduct() {return !products.isEmpty();}
 	public Receive createReceive() {
 		return receiveBuilder()
 			.match(Product.class, c-> { 
@@ -43,13 +44,13 @@ abstract class Producer<T> extends AbstractActor{
 				if (products.size() < maxStorage && !running){						
 				    running = true;
 					self().tell(new MakeOne(),self());}})
+			.match(HasProduct.class,c-> sender().tell(!products.isEmpty(),self()))
 			.build();}	
 }
 class Alice extends Producer<Wheat>{
 	CompletableFuture<Wheat> make(){return CompletableFuture.supplyAsync(()->new Wheat());}
 }
 class Bob extends Producer<Sugar>{
-	int makingCount=0;
 	CompletableFuture<Sugar> make(){
 		synchronized(Sugar.class) {
 			try {Thread.sleep(200); //ms time taken to make
@@ -64,11 +65,19 @@ class Charles extends Producer<Cake>{
 	CompletableFuture<Cake> make(){
 		CompletableFuture<?> wheat = Patterns.ask(alice, 
 				new GiveOne(),Duration.ofMillis(10_000_000)).toCompletableFuture();
-		
-		for(ActorRef bob:bobs) {}
-		CompletableFuture<?> sugar = Patterns.ask(bobs.get(0), 
+		ActorRef chosenBob  = bobs.get(0); //relying on having at least one bob
+		//If a bob has product then choose to ask them
+		for(ActorRef bob:bobs) {
+			CompletableFuture<?> hasProduct = 
+					Patterns.ask(bob,new HasProduct(),Duration.ofMillis(10_000_000)).toCompletableFuture();
+			//If this bob has product then we have our chosen one
+			if ((Boolean)hasProduct.join()) {chosenBob = bob; break;}
+		}
+		//Get the other bobs making product
+		for(ActorRef bob:bobs) {if (bob!=chosenBob) bob.tell(new MakeOne(), self());};
+		//Get the wheat from the chosenBob
+		CompletableFuture<?> sugar = Patterns.ask(chosenBob, 
 				new GiveOne(),Duration.ofMillis(10_000_000)).toCompletableFuture();
-		
 		//When the ingredients are ready, initiate cake making and return the completable future
 		return CompletableFuture.allOf(wheat, sugar)
 			.thenApplyAsync(v -> new Cake((Sugar)sugar.join(), (Wheat)wheat.join()));
@@ -125,7 +134,7 @@ public class Cakes{
 			s.actorOf(Props.create(Alice.class,()->new Alice()),"Alice");
 		//ActorRef bob=//makes sugar
 		List<ActorRef> bobs = new ArrayList<>();
-		int numberOfBobs = 1;
+		int numberOfBobs = 4;
 		for(int i=0;i<numberOfBobs;i++) {
 			bobs.add(s.actorOf(Props.create(Bob.class,()->new Bob()),"Bob"+i));}
 		ActorRef charles=// makes cakes with wheat and sugar
